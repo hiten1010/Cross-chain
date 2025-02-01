@@ -1,6 +1,5 @@
 # QuantumBridge - Cross-Chain Interoperability Protocol
 
-![Project Banner](https://i.imgur.com/5X6Qk9T.png)
 
 A next-generation cross-chain asset bridge enabling secure, instant transfers between EVM, Cosmos, and Solana chains. Built with Next.js 14 and TypeScript.
 
