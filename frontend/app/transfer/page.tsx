@@ -11,6 +11,7 @@ import { useWriteContract } from 'wagmi'
 import bridgeABI from '../../abi/bridge.json'
 import { useQuery } from '@apollo/client'
 import { gql } from '@apollo/client'
+import { injected } from '@wagmi/connectors'
 
 // Add bridge address constant
 const bridgeAddress = '0xYourContractAddressHere' // Replace with actual contract address
@@ -33,6 +34,8 @@ const GET_TRANSACTIONS = gql`
 `;
 
 export default function Transfer() {
+  const { address, isConnected } = useAccount()
+  const { connect } = useConnect()
   const [walletAddress, setWalletAddress] = useState<string | null>(null)
   const [transferDirection, setTransferDirection] = useState<"AtoB" | "BtoA">("AtoB")
   const [selectedToken, setSelectedToken] = useState("")
@@ -66,10 +69,12 @@ export default function Transfer() {
     }
   }
 
-  const handleConnectWallet = async () => {
-    const address = await connectWallet()
-    setWalletAddress(address)
-    setRecipientAddress(address)
+  const handleConnectWallet = () => {
+    connect({ 
+      connector: injected({
+        target: "metaMask" // Explicitly specify wallet provider
+      }) 
+    })
   }
 
   return (

@@ -10,7 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { FaUpload, FaCheck, FaTimes, FaExternalLinkAlt, FaInfoCircle } from "react-icons/fa"
 import { MerkleTree } from 'merkletreejs'
-import { ethers } from 'ethers'
+import { utils } from 'ethers'
 
 type VerificationResult = {
   isValid: boolean
@@ -72,8 +72,8 @@ export default function ProofVerification() {
   }
 
   const generateMerkleProof = (txData: any) => {
-    const leaves = [txData].map(x => ethers.keccak256(x));
-    const tree = new MerkleTree(leaves, ethers.keccak256);
+    const leaves = [txData].map(x => utils.keccak256(x));
+    const tree = new MerkleTree(leaves, utils.keccak256);
     return tree.getHexProof(leaves[0]);
   };
 
