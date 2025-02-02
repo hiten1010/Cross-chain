@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState,useEffect} from "react"
 import Head from "next/head"
 import { FaInfoCircle, FaArrowRight, FaWallet } from "react-icons/fa"
 import Link from "next/link"
@@ -12,6 +12,7 @@ import bridgeABI from '../../abi/bridge.json'
 import { useQuery } from '@apollo/client'
 import { gql } from '@apollo/client'
 import { injected } from '@wagmi/connectors'
+import {ethers} from "ethers";
 
 // Add bridge address constant
 const bridgeAddress = '0xYourContractAddressHere' // Replace with actual contract address
@@ -48,6 +49,26 @@ export default function Transfer() {
   const { chains, error, switchChain } = useSwitchChain()
   const { writeContract } = useWriteContract()
 
+
+   // Automatically set walletAddress if already connected
+   useEffect(() => {
+    if (isConnected && address) {
+      setWalletAddress(address)
+    }
+  }, [isConnected, address])
+
+  const handleConnectWallet = async () => {
+    try {
+      connect({
+        connector: injected({ target: "metaMask" }), // MetaMask connection
+      })
+    } catch (error) {
+      console.error("Wallet connection error:", error)
+      alert("Failed to connect wallet.")
+    }
+  }
+
+
   const handleTransfer = async () => {
     setTransactionStatus("Waiting for Wallet Confirmation...")
     try {
@@ -57,25 +78,28 @@ export default function Transfer() {
         functionName: 'lockTokens',
         args: [amount, recipientAddress, selectedToken],
       }, {
-        onSuccess: (hash) => {
+        onSuccess: (hash: string) => {
           setTransactionStatus(`Transaction Successful! Hash: ${hash}`)
         },
-        onError: (error) => {
-          setTransactionStatus(`Error: ${error.message}`)
+        onError: (error : unknown) => {
+          if (error instanceof Error) {
+            setTransactionStatus(`Error: ${error.message}`)
+          } else {
+            setTransactionStatus("Unknown error occurred.")
+          }
+          
         }
       })
     } catch (error) {
-      setTransactionStatus(`Error: ${error.message}`)
+      if (error instanceof Error) {
+        setTransactionStatus(`Error: ${error.message}`)
+      } else {
+        setTransactionStatus("Unknown error occurred.")
+      }
     }
   }
 
-  const handleConnectWallet = () => {
-    connect({ 
-      connector: injected({
-        target: "metaMask" // Explicitly specify wallet provider
-      }) 
-    })
-  }
+ 
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-100 via-purple-100 to-pink-100 font-sans text-gray-800">
@@ -170,7 +194,7 @@ export default function Transfer() {
               >
                 <option value="">Choose an ERC-20 or ERC-721 asset</option>
                 <option value="ETH">ETH</option>
-                <option value="USDC">USDC</option>
+                <option value="USDC">AMOY</option>
                 {/* Add more token options here */}
               </select>
             </div>
