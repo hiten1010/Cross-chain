@@ -1,114 +1,252 @@
 "use client"
 
-import { useState,useEffect} from "react"
-import Head from "next/head"
-import { FaInfoCircle, FaArrowRight, FaWallet } from "react-icons/fa"
+import { useState, useCallback } from "react"
+import { FaArrowRight, FaExchangeAlt, FaInfoCircle } from "react-icons/fa"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { useAccount, useConnect } from 'wagmi'
-import { useChainId, useSwitchChain } from 'wagmi'
-import { useWriteContract } from 'wagmi'
-import bridgeABI from '../../abi/bridge.json'
-import { useQuery } from '@apollo/client'
-import { gql } from '@apollo/client'
-import { injected } from '@wagmi/connectors'
-import {ethers} from "ethers";
+import { useAccount } from 'wagmi'
+import { parseEther, Address, formatEther } from 'viem'
+import { useTransfer } from '@/hooks/useTransfer'
+import { useBridge } from '@/contexts/BridgeContext'
+import { chainConfigs } from '@/types/contracts'
+import { amoy } from '@/config/chains'
+import { CHAIN_IDS } from '@/constants/chains'
+import { toast } from 'react-hot-toast'
+import { useTokenBalance } from '@/hooks/useTokenBalance'
+import { useChainSwitch } from '@/hooks/useChainSwitch'
+import { TokenInput } from '@/components/TokenInput'
+import { TransferStatus } from '@/components/TransferStatus'
+import { useTransferService } from '@/hooks/useTransferService'
+import type { Transfer } from '@/types/transfer'
+import { NetworkBadge } from '@/components/NetworkBadge'
 
-// Add bridge address constant
-const bridgeAddress = '0xYourContractAddressHere' // Replace with actual contract address
+// Components
+const InfoBanner = () => (
+  <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4 mb-6">
+    <div className="flex items-start">
+      <FaInfoCircle className="text-indigo-500 mt-1 mr-3" />
+      <div>
+        <h4 className="font-medium text-indigo-800">Important Information</h4>
+        <p className="text-sm text-indigo-600 mt-1">
+          Transfers typically take 2-5 minutes to complete. Make sure you have enough funds to cover gas fees on both chains.
+        </p>
+      </div>
+    </div>
+  </div>
+)
 
-// Mock function for wallet connection
-const connectWallet = async () => {
-  // Implement actual wallet connection logic here
-  return "0x1234...5678"
+interface ChainSelectorProps {
+  direction: "AtoB" | "BtoA"
+  onChange: (dir: "AtoB" | "BtoA") => void
+  disabled?: boolean
 }
 
-const GET_TRANSACTIONS = gql`
-  query GetTransactions($address: String!) {
-    locks(where: { sender: $address }) {
-      id
-      amount
-      token
-      timestamp
-    }
-  }
-`;
+const ChainSelector = ({ direction, onChange, disabled }: ChainSelectorProps) => (
+  <div className="mb-6">
+    <label className="block text-sm font-medium text-gray-700 mb-2">Transfer Direction</label>
+    <div className="flex space-x-4">
+      <button
+        onClick={() => !disabled && onChange("AtoB")}
+        disabled={disabled}
+        className={`flex-1 px-4 py-3 rounded-full font-semibold transition-all ${
+          direction === "AtoB"
+            ? "bg-gradient-to-r from-indigo-600 to-purple-600 text-white"
+            : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+        } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+      >
+        <NetworkBadge chainId={CHAIN_IDS.AMOY} />
+        <FaArrowRight className="inline-block mx-2" />
+        <NetworkBadge chainId={CHAIN_IDS.SEPOLIA} />
+      </button>
+      <button
+        onClick={() => !disabled && onChange("BtoA")}
+        disabled={disabled}
+        className={`flex-1 px-4 py-3 rounded-full font-semibold transition-all ${
+          direction === "BtoA"
+            ? "bg-gradient-to-r from-purple-600 to-indigo-600 text-white"
+            : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+        } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+      >
+        <NetworkBadge chainId={CHAIN_IDS.SEPOLIA} />
+        <FaArrowRight className="inline-block mx-2" />
+        <NetworkBadge chainId={CHAIN_IDS.AMOY} />
+      </button>
+    </div>
+  </div>
+)
 
-export default function Transfer() {
-  const { address, isConnected } = useAccount()
-  const { connect } = useConnect()
-  const [walletAddress, setWalletAddress] = useState<string | null>(null)
-  const [transferDirection, setTransferDirection] = useState<"AtoB" | "BtoA">("AtoB")
-  const [selectedToken, setSelectedToken] = useState("")
+interface TokenSelectProps {
+  value: string
+  onChange: (value: string) => void
+  tokens: Array<{ address: string; symbol: string }>
+  chainId: number
+  disabled?: boolean
+  error?: string
+}
+
+const TokenSelect = ({ value, onChange, tokens, chainId, disabled, error }: TokenSelectProps) => (
+  <div className="mb-6">
+    <label className="block text-sm font-medium text-gray-700 mb-2">
+      Select Token
+      <NetworkBadge chainId={chainId} />
+    </label>
+    <div className="relative">
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        className={`w-full px-4 py-3 rounded-full border ${
+          error ? 'border-red-300' : 'border-gray-300'
+        } appearance-none bg-white disabled:opacity-50 disabled:cursor-not-allowed`}
+      >
+        <option value="">Select a token</option>
+        {tokens.map((token) => (
+          <option key={token.address} value={token.address}>
+            {token.symbol}
+          </option>
+        ))}
+      </select>
+      <FaExchangeAlt className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+    </div>
+    {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
+  </div>
+)
+
+interface AddressInputProps {
+  value: string
+  onChange: (value: string) => void
+  error?: string
+  disabled?: boolean
+}
+
+const AddressInput = ({ value, onChange, error, disabled }: AddressInputProps) => (
+  <div className="mb-6">
+    <label className="block text-sm font-medium text-gray-700 mb-2">
+      Recipient Address
+    </label>
+    <input
+      type="text"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      disabled={disabled}
+      className={`w-full px-4 py-3 rounded-full border ${
+        error ? 'border-red-300' : 'border-gray-300'
+      } disabled:opacity-50 disabled:cursor-not-allowed`}
+      placeholder="0x..."
+    />
+    {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
+  </div>
+)
+
+type TransferDirection = "AtoB" | "BtoA"
+
+export default function TransferPage() {
   const [amount, setAmount] = useState("")
   const [recipientAddress, setRecipientAddress] = useState("")
-  const [isApproved, setIsApproved] = useState(false)
-  const [transactionStatus, setTransactionStatus] = useState<string | null>(null)
+  const [transferDirection, setTransferDirection] = useState<TransferDirection>("AtoB")
+  const [selectedToken, setSelectedToken] = useState("")
+  const [inputError, setInputError] = useState("")
+  const [isTransferring, setIsTransferring] = useState(false)
+
+  const { address, isConnected } = useAccount()
+  const { pendingTransfers, transferHistory } = useBridge()
   const pathname = usePathname()
-  const chainId = useChainId()
-  const { chains, error, switchChain } = useSwitchChain()
-  const { writeContract } = useWriteContract()
 
+  const sourceChainId = transferDirection === "AtoB" ? CHAIN_IDS.AMOY : CHAIN_IDS.SEPOLIA
+  const targetChainId = transferDirection === "AtoB" ? CHAIN_IDS.SEPOLIA : CHAIN_IDS.AMOY
 
-   // Automatically set walletAddress if already connected
-   useEffect(() => {
-    if (isConnected && address) {
-      setWalletAddress(address)
+  const { isCorrectChain } = useChainSwitch(sourceChainId)
+  const { tokenBalance } = useTokenBalance(sourceChainId)
+  const { executeLockTokens, executeMintTokens } = useTransfer()
+  const transferService = useTransferService()
+
+  const sourceTokens = chainConfigs[sourceChainId]?.supportedTokens || []
+  const selectedTokenInfo = sourceTokens.find(t => t.address === selectedToken)
+
+  const validateInput = useCallback(() => {
+    if (!isConnected) {
+      toast.error('Please connect your wallet first')
+      return false
     }
-  }, [isConnected, address])
 
-  const handleConnectWallet = async () => {
-    try {
-      connect({
-        connector: injected({ target: "metaMask" }), // MetaMask connection
-      })
-    } catch (error) {
-      console.error("Wallet connection error:", error)
-      alert("Failed to connect wallet.")
+    if (!isCorrectChain) {
+      toast.error('Please switch to the correct network')
+      return false
     }
-  }
 
+    if (!selectedToken) {
+      setInputError('Please select a token')
+      return false
+    }
 
-  const handleTransfer = async () => {
-    setTransactionStatus("Waiting for Wallet Confirmation...")
+    if (!amount || parseFloat(amount) <= 0) {
+      setInputError('Please enter a valid amount')
+      return false
+    }
+
     try {
-      writeContract({
-        address: bridgeAddress,
-        abi: bridgeABI,
-        functionName: 'lockTokens',
-        args: [amount, recipientAddress, selectedToken],
-      }, {
-        onSuccess: (hash: string) => {
-          setTransactionStatus(`Transaction Successful! Hash: ${hash}`)
-        },
-        onError: (error : unknown) => {
-          if (error instanceof Error) {
-            setTransactionStatus(`Error: ${error.message}`)
-          } else {
-            setTransactionStatus("Unknown error occurred.")
-          }
-          
-        }
-      })
-    } catch (error) {
-      if (error instanceof Error) {
-        setTransactionStatus(`Error: ${error.message}`)
-      } else {
-        setTransactionStatus("Unknown error occurred.")
+      const transferAmount = parseEther(amount)
+      if (tokenBalance && transferAmount > tokenBalance) {
+        setInputError('Insufficient balance')
+        return false
       }
+    } catch (error) {
+      setInputError('Invalid amount format')
+      return false
     }
-  }
 
- 
+    if (!recipientAddress || !/^0x[a-fA-F0-9]{40}$/.test(recipientAddress)) {
+      setInputError('Invalid recipient address')
+      return false
+    }
+
+    setInputError('')
+    return true
+  }, [isConnected, isCorrectChain, selectedToken, amount, recipientAddress, tokenBalance])
+
+  const handleSubmit = useCallback(async () => {
+    if (!validateInput()) return
+
+    try {
+      const transferAmount = parseEther(amount)
+      await executeLockTokens({
+        sourceChainId,
+        targetChainId,
+        token: selectedToken as Address,
+        amount: transferAmount,
+        recipient: recipientAddress as Address,
+      })
+      
+      setAmount('')
+      setRecipientAddress('')
+    } catch (error) {
+      console.error('Transfer failed:', error)
+      toast.error('Transfer failed. Please try again.')
+    }
+  }, [validateInput, amount, executeLockTokens, sourceChainId, targetChainId, selectedToken, recipientAddress])
+
+  const handleVerifyTransfer = useCallback(async (txHash: string) => {
+    try {
+      const transfer = transferHistory.find(t => t.txHash === txHash as Address)
+      if (!transfer?.proof) {
+        toast.error('No proof found for this transfer')
+        return
+      }
+
+      const isValid = await transferService.verifyProof({
+        transferId: txHash as `0x${string}`,
+        proof: transfer.proof,
+        chainId: sourceChainId,
+      })
+      toast.success(isValid ? 'Transfer verified!' : 'Transfer verification failed')
+    } catch (error) {
+      console.error('Verification failed:', error)
+      toast.error('Verification failed')
+    }
+  }, [transferService, sourceChainId, transferHistory])
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-100 via-purple-100 to-pink-100 font-sans text-gray-800">
-      <Head>
-        <title>Cross-Chain Transfer | DApp Name</title>
-        <meta name="description" content="Transfer assets across chains securely" />
-        <link rel="icon" href="/favicon.ico" />
-      </Head>
-
+    <div className="min-h-screen bg-gradient-to-br from-indigo-100 via-purple-100 to-pink-100">
       <header className="bg-white shadow-sm">
         <nav className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex justify-between items-center">
@@ -135,200 +273,96 @@ export default function Transfer() {
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="text-center mb-12">
-          <h1 className="text-5xl sm:text-6xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600 mb-4">
+          <h1 className="text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600 mb-4">
             Cross-Chain Transfer
           </h1>
-          <p className="text-xl text-gray-600 mb-8">Lock & Mint, or Burn & Unlock your assets across chains</p>
-          {!walletAddress && (
-            <button
-              onClick={handleConnectWallet}
-              className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-bold py-3 px-8 rounded-full hover:from-indigo-700 hover:to-purple-700 transition duration-300 ease-in-out transform hover:-translate-y-1 hover:shadow-lg"
-            >
-              <FaWallet className="inline-block mr-2" /> Connect Wallet
-            </button>
-          )}
+          <p className="text-xl text-gray-600">
+            Lock & Mint, or Burn & Unlock your assets across chains
+          </p>
         </div>
 
         <div className="grid md:grid-cols-2 gap-8">
-          {/* Transfer Form */}
-          <div className="bg-white p-8 rounded-2xl shadow-xl transition-all duration-300 hover:shadow-2xl">
-            <h2 className="text-3xl font-bold mb-6 text-indigo-800">Transfer Your Assets</h2>
+          <div className="bg-white p-8 rounded-2xl shadow-xl">
+            <InfoBanner />
+            
+            <ChainSelector 
+              direction={transferDirection} 
+              onChange={setTransferDirection}
+              disabled={isTransferring} 
+            />
 
-            {/* Chain Direction Toggle */}
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Transfer Direction</label>
-              <div className="flex space-x-4">
-                <button
-                  onClick={() => setTransferDirection("AtoB")}
-                  className={`flex-1 px-4 py-3 rounded-full font-semibold transition-all duration-300 ${
-                    transferDirection === "AtoB"
-                      ? "bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-md"
-                      : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-                  }`}
-                >
-                  Chain A <FaArrowRight className="inline-block mx-2" /> Chain B
-                </button>
-                <button
-                  onClick={() => setTransferDirection("BtoA")}
-                  className={`flex-1 px-4 py-3 rounded-full font-semibold transition-all duration-300 ${
-                    transferDirection === "BtoA"
-                      ? "bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md"
-                      : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-                  }`}
-                >
-                  Chain B <FaArrowRight className="inline-block mx-2" /> Chain A
-                </button>
-              </div>
-            </div>
+            <TokenSelect
+              value={selectedToken}
+              onChange={setSelectedToken}
+              tokens={sourceTokens}
+              chainId={sourceChainId}
+              disabled={isTransferring}
+              error={inputError && !selectedToken ? 'Please select a token' : undefined}
+            />
 
-            {/* Select Token */}
-            <div className="mb-6">
-              <label htmlFor="token" className="block text-sm font-medium text-gray-700 mb-2">
-                Select Token
-              </label>
-              <select
-                id="token"
-                value={selectedToken}
-                onChange={(e) => setSelectedToken(e.target.value)}
-                className="mt-1 block w-full pl-3 pr-10 py-3 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-full"
-              >
-                <option value="">Choose an ERC-20 or ERC-721 asset</option>
-                <option value="ETH">ETH</option>
-                <option value="USDC">AMOY</option>
-                {/* Add more token options here */}
-              </select>
-            </div>
+            <TokenInput
+              value={amount}
+              onChange={setAmount}
+              balance={tokenBalance}
+              symbol={selectedTokenInfo?.symbol}
+              onMax={() => tokenBalance && setAmount(formatEther(tokenBalance))}
+              error={inputError}
+              disabled={isTransferring}
+            />
 
-            {/* Amount Input */}
-            <div className="mb-6">
-              <label htmlFor="amount" className="block text-sm font-medium text-gray-700 mb-2">
-                Amount
-              </label>
-              <input
-                type="text"
-                id="amount"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="Enter the amount"
-                className="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-full shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-              />
-            </div>
+            <AddressInput
+              value={recipientAddress}
+              onChange={setRecipientAddress}
+              error={inputError && !recipientAddress ? 'Please enter a valid address' : undefined}
+              disabled={isTransferring}
+            />
 
-            {/* Recipient Address */}
-            <div className="mb-6">
-              <label htmlFor="recipient" className="block text-sm font-medium text-gray-700 mb-2">
-                Recipient (on Destination Chain)
-              </label>
-              <input
-                type="text"
-                id="recipient"
-                value={recipientAddress}
-                onChange={(e) => setRecipientAddress(e.target.value)}
-                placeholder="Enter recipient address"
-                className="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-full shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-              />
-            </div>
+            <button
+              onClick={handleSubmit}
+              disabled={!isConnected || isTransferring || !!inputError}
+              className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-bold py-3 px-8 rounded-full hover:from-indigo-700 hover:to-purple-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {!isConnected 
+                ? "Connect Wallet" 
+                : isTransferring 
+                  ? "Processing..." 
+                  : "Transfer"
+              }
+            </button>
+          </div>
 
-            {/* Approve & Transfer Buttons */}
-            <div className="flex flex-col space-y-4">
-              {!isApproved && (
-                <button
-                  onClick={() => setIsApproved(true)}
-                  className="w-full bg-gradient-to-r from-green-400 to-blue-500 text-white font-semibold py-3 px-6 rounded-full hover:from-green-500 hover:to-blue-600 transition duration-300 ease-in-out transform hover:-translate-y-1 hover:shadow-lg"
-                >
-                  Approve
-                </button>
-              )}
-              <button
-                onClick={handleTransfer}
-                disabled={!isApproved}
-                className={`w-full font-semibold py-3 px-6 rounded-full transition duration-300 ease-in-out transform hover:-translate-y-1 hover:shadow-lg ${
-                  isApproved
-                    ? "bg-gradient-to-r from-purple-600 to-indigo-600 text-white hover:from-purple-700 hover:to-indigo-700"
-                    : "bg-gray-300 text-gray-500 cursor-not-allowed"
-                }`}
-              >
-                {transferDirection === "AtoB" ? "Lock & Mint" : "Burn & Unlock"}
-              </button>
-            </div>
-
-            {/* Transaction Status */}
-            {transactionStatus && (
-              <div
-                className={`mt-6 p-4 rounded-xl ${
-                  transactionStatus.includes("Successful") ? "bg-green-100 text-green-800" : "bg-blue-100 text-blue-800"
-                }`}
-              >
-                <p className="font-semibold">{transactionStatus}</p>
+          <div className="space-y-6">
+            {pendingTransfers.length > 0 && (
+              <div className="bg-white p-8 rounded-2xl shadow-xl">
+                <h3 className="text-xl font-bold mb-4">Pending Transfers</h3>
+                {pendingTransfers.map((transfer) => (
+                  <TransferStatus 
+                    key={transfer.txHash} 
+                    transfer={transfer}
+                  />
+                ))}
               </div>
             )}
-          </div>
 
-          {/* Transaction Summary / Side Panel */}
-          <div className="bg-white p-8 rounded-2xl shadow-xl transition-all duration-300 hover:shadow-2xl">
-            <h2 className="text-3xl font-bold mb-6 text-indigo-800">Transfer Summary</h2>
-            <ul className="space-y-4 text-gray-700">
-              <li className="flex items-center">
-                <span className="font-medium mr-2">Direction:</span>
-                <span className="bg-indigo-100 text-indigo-800 py-1 px-3 rounded-full">
-                  {transferDirection === "AtoB" ? "Chain A to Chain B" : "Chain B to Chain A"}
-                </span>
-              </li>
-              <li className="flex items-center">
-                <span className="font-medium mr-2">Token:</span>
-                <span className="bg-purple-100 text-purple-800 py-1 px-3 rounded-full">
-                  {selectedToken || "Not selected"}
-                </span>
-              </li>
-              <li className="flex items-center">
-                <span className="font-medium mr-2">Amount:</span>
-                <span className="bg-blue-100 text-blue-800 py-1 px-3 rounded-full">{amount || "Not specified"}</span>
-              </li>
-              <li className="flex items-center">
-                <span className="font-medium mr-2">Recipient:</span>
-                <span className="bg-pink-100 text-pink-800 py-1 px-3 rounded-full truncate max-w-xs">
-                  {recipientAddress || "Not specified"}
-                </span>
-              </li>
-            </ul>
-            <div className="mt-8 bg-gradient-to-r from-indigo-50 to-purple-50 p-6 rounded-xl">
-              <h3 className="text-xl font-semibold mb-3 text-indigo-800">How it works</h3>
-              <p className="text-gray-700">
-                When you lock tokens on one chain, an equivalent amount is minted on the destination chain. This process
-                ensures that the total supply remains constant across both chains.
-              </p>
-            </div>
-            <div className="mt-8">
-              <button className="text-indigo-600 hover:text-indigo-800 transition duration-300 flex items-center font-medium">
-                <FaInfoCircle className="mr-2" />
-                Learn more about cross-chain transfers
-              </button>
+            <div className="bg-white p-8 rounded-2xl shadow-xl">
+              <h3 className="text-xl font-bold mb-4">Recent Transfers</h3>
+              {transferHistory.length > 0 ? (
+                transferHistory.slice(0, 5).map((transfer) => (
+                  <TransferStatus 
+                    key={transfer.txHash} 
+                    transfer={transfer}
+                    onVerify={handleVerifyTransfer}
+                    showDetails
+                  />
+                ))
+              ) : (
+                <p className="text-gray-500 text-center py-4">
+                  No transfer history yet
+                </p>
+              )}
             </div>
           </div>
         </div>
-
-        {/* Call-to-Action for History */}
-        <div className="mt-12 text-center">
-          <a
-            href="/history"
-            className="inline-block bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-bold py-3 px-8 rounded-full hover:from-indigo-700 hover:to-purple-700 transition duration-300 ease-in-out transform hover:-translate-y-1 hover:shadow-lg"
-          >
-            View Your Transfer History
-          </a>
-        </div>
-
-        {/* After transfer success message */}
-        {transactionStatus === "Transaction Successful!" && (
-          <div className="mt-4 text-center">
-            <Link
-              href="/proof"
-              className="text-indigo-600 hover:text-indigo-800 flex items-center justify-center"
-            >
-              <FaInfoCircle className="mr-2" />
-              Verify Transaction Proof
-            </Link>
-          </div>
-        )}
       </main>
     </div>
   )

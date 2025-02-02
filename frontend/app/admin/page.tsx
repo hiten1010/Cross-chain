@@ -1,97 +1,200 @@
 "use client"
 
-import { useState } from "react"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Switch } from "@/components/ui/switch"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { FaTrash, FaPlus, FaExclamationTriangle } from "react-icons/fa"
-import { usePathname } from "next/navigation"
+import { useState, useCallback, useMemo } from "react"
+import { useAccount } from 'wagmi'
+import { Address, Hash, formatEther } from 'viem'
+import { FaUserShield, FaExclamationTriangle, FaPause, FaPlay, FaCog, FaChartLine } from "react-icons/fa"
 import Link from "next/link"
+import { usePathname } from "next/navigation"
+import { useBridgeContract } from '@/hooks/useBridgeContract'
+import { useTransferService } from '@/hooks/useTransferService'
+import { amoy, sepolia } from '@/config/chains'
+import { toast } from 'react-hot-toast'
+import { useAdmin } from '@/hooks/useAdmin'
+import { useTransferStats } from '@/hooks/useTransferStats'
 
-// Mock data and functions
-const mockTokens = [
-  { address: "0x1234...5678", symbol: "ETH" },
-  { address: "0xabcd...efgh", symbol: "USDC" },
-]
+interface BridgeStats {
+  totalTransfers: number
+  totalVolume: bigint
+  activeValidators: number
+  averageTime: number
+}
 
-const mockRoles = [
-  { address: "0x9876...5432", role: "Admin" },
-  { address: "0xfedc...ba98", role: "Relayer" },
-]
+interface NetworkStats {
+  chainId: number
+  name: string
+  stats: BridgeStats
+}
 
-const isAdmin = true // Replace with actual admin check
-const bridgePaused = false // Replace with actual bridge state
+const StatCard = ({ title, value, icon: Icon, change }: { 
+  title: string
+  value: string
+  icon: React.ComponentType
+  change?: { value: number; isPositive: boolean }
+}) => (
+  <div className="bg-white rounded-xl p-6 shadow-sm">
+    <div className="flex items-start justify-between">
+      <div>
+        <p className="text-sm font-medium text-gray-600">{title}</p>
+        <p className="mt-2 text-3xl font-bold text-gray-900">{value}</p>
+        {change && (
+          <p className={`mt-2 text-sm ${change.isPositive ? 'text-green-600' : 'text-red-600'}`}>
+            {change.isPositive ? '↑' : '↓'} {change.value}% from last period
+          </p>
+        )}
+      </div>
+      <div className="p-3 bg-indigo-50 rounded-lg">
+        <Icon className="w-6 h-6 text-indigo-600" />
+      </div>
+    </div>
+  </div>
+)
+
+const AdminActions = ({ 
+  isPaused,
+  onTogglePause,
+  isLoading 
+}: { 
+  isPaused: boolean
+  onTogglePause: () => Promise<void>
+  isLoading: boolean
+}) => (
+  <div className="bg-white rounded-xl p-6 shadow-sm">
+    <h3 className="text-lg font-medium text-gray-900 mb-4">Admin Actions</h3>
+    <div className="space-y-4">
+      <button
+        onClick={onTogglePause}
+        disabled={isLoading}
+        className={`w-full flex items-center justify-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${
+          isPaused
+            ? 'bg-green-600 hover:bg-green-700'
+            : 'bg-red-600 hover:bg-red-700'
+        } disabled:opacity-50 disabled:cursor-not-allowed`}
+      >
+        {isLoading ? (
+          <FaCog className="animate-spin mr-2" />
+        ) : isPaused ? (
+          <FaPlay className="mr-2" />
+        ) : (
+          <FaPause className="mr-2" />
+        )}
+        {isPaused ? 'Resume Bridge' : 'Pause Bridge'}
+      </button>
+
+      <button
+        onClick={() => toast.error('Not implemented yet')}
+        className="w-full flex items-center justify-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+      >
+        <FaExclamationTriangle className="mr-2" />
+        Emergency Stop
+      </button>
+    </div>
+  </div>
+)
+
+const NetworkStatsCard = ({ stats }: { stats: NetworkStats }) => (
+  <div className="bg-white rounded-xl p-6 shadow-sm">
+    <div className="flex items-center justify-between mb-4">
+      <h3 className="text-lg font-medium text-gray-900">{stats.name} Network</h3>
+      <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
+        Chain ID: {stats.chainId}
+      </span>
+    </div>
+    <div className="grid grid-cols-2 gap-4">
+      <div>
+        <p className="text-sm font-medium text-gray-600">Total Transfers</p>
+        <p className="mt-1 text-2xl font-semibold text-gray-900">
+          {stats.stats.totalTransfers}
+        </p>
+      </div>
+      <div>
+        <p className="text-sm font-medium text-gray-600">Total Volume</p>
+        <p className="mt-1 text-2xl font-semibold text-gray-900">
+          {formatEther(stats.stats.totalVolume)} ETH
+        </p>
+      </div>
+      <div>
+        <p className="text-sm font-medium text-gray-600">Active Validators</p>
+        <p className="mt-1 text-2xl font-semibold text-gray-900">
+          {stats.stats.activeValidators}
+        </p>
+      </div>
+      <div>
+        <p className="text-sm font-medium text-gray-600">Avg. Transfer Time</p>
+        <p className="mt-1 text-2xl font-semibold text-gray-900">
+          {stats.stats.averageTime}s
+        </p>
+      </div>
+    </div>
+  </div>
+)
 
 export default function AdminPage() {
+  const { isConnected } = useAccount()
+  const { isAdmin, isLoading: isAdminLoading, pauseBridge, resumeBridge, emergencyStop } = useAdmin()
+  const [isPaused, setIsPaused] = useState(false)
+  const [isActionLoading, setIsActionLoading] = useState(false)
   const pathname = usePathname()
-  const [newTokenAddress, setNewTokenAddress] = useState("")
-  const [newTokenSymbol, setNewTokenSymbol] = useState("")
-  const [bridgeFee, setBridgeFee] = useState("0.1")
-  const [minDeposit, setMinDeposit] = useState("0.01")
-  const [newRoleAddress, setNewRoleAddress] = useState("")
-  const [newRole, setNewRole] = useState("")
-  const [auditLogs, setAuditLogs] = useState([]);
-  const [signerVerification, setSignerVerification] = useState(false);
+  const { stats, isLoading: isStatsLoading } = useTransferStats()
 
-  const handleAddToken = () => {
-    // Implement token addition logic
-    console.log("Adding token:", newTokenAddress, newTokenSymbol)
-    setNewTokenAddress("")
-    setNewTokenSymbol("")
-  }
+  const handleTogglePause = useCallback(async () => {
+    if (!isAdmin) {
+      toast.error('Admin access required')
+      return
+    }
 
-  const handleRemoveToken = (address: string) => {
-    // Implement token removal logic
-    console.log("Removing token:", address)
-  }
+    setIsActionLoading(true)
+    try {
+      const success = isPaused ? await resumeBridge() : await pauseBridge()
+      if (success) {
+        setIsPaused(!isPaused)
+      }
+    } finally {
+      setIsActionLoading(false)
+    }
+  }, [isAdmin, isPaused, pauseBridge, resumeBridge])
 
-  const handleUpdateBridgeParams = () => {
-    // Implement bridge parameter update logic
-    console.log("Updating bridge params:", { bridgeFee, minDeposit })
-  }
+  const handleEmergencyStop = useCallback(async () => {
+    if (!isAdmin) {
+      toast.error('Admin access required')
+      return
+    }
 
-  const handleAddRole = () => {
-    // Implement role addition logic
-    console.log("Adding role:", newRoleAddress, newRole)
-    setNewRoleAddress("")
-    setNewRole("")
-  }
+    setIsActionLoading(true)
+    try {
+      await emergencyStop()
+    } finally {
+      setIsActionLoading(false)
+    }
+  }, [isAdmin, emergencyStop])
 
-  const handleRemoveRole = (address: string) => {
-    // Implement role removal logic
-    console.log("Removing role:", address)
-  }
-
-  const handleToggleBridge = () => {
-    // Implement bridge pause/unpause logic
-    console.log("Toggling bridge state")
-  }
-
-  const verifyMultiSig = async (txHash: string) => {
-    // Implement multi-sig verification logic
-  };
-
-  if (!isAdmin) {
+  if (isAdminLoading) {
     return (
-      <div className="min-h-screen bg-[#f7f9fc] flex items-center justify-center">
-        <Card className="w-full max-w-md">
-          <CardHeader>
-            <CardTitle className="text-center text-red-600">Access Denied</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-center">Admin privileges required to access this page.</p>
-          </CardContent>
-        </Card>
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <FaCog className="animate-spin h-8 w-8 text-indigo-600" />
+      </div>
+    )
+  }
+
+  if (!isConnected || !isAdmin) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <FaUserShield className="mx-auto h-12 w-12 text-gray-400" />
+          <h2 className="mt-2 text-lg font-medium text-gray-900">Admin Access Required</h2>
+          <p className="mt-1 text-sm text-gray-500">
+            {!isConnected 
+              ? "Please connect your wallet to access admin features."
+              : "Your wallet does not have admin privileges."
+            }
+          </p>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-[#f7f9fc]">
+    <div className="min-h-screen bg-gray-50">
       <header className="bg-white shadow-sm">
         <nav className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex justify-between items-center">
@@ -100,230 +203,66 @@ export default function AdminPage() {
             </Link>
             <div className="space-x-6">
               <Link 
-                href="/" 
-                className={`hover:text-indigo-600 transition-colors ${pathname === '/' ? 'text-indigo-600' : ''}`}
+                href="/transfer" 
+                className={`hover:text-indigo-600 transition-colors ${pathname === '/transfer' ? 'text-indigo-600' : ''}`}
               >
-                Home
+                Transfer
               </Link>
-              {isAdmin && (
-                <Link 
-                  href="/admin" 
-                  className={`hover:text-indigo-600 transition-colors ${pathname === '/admin' ? 'text-indigo-600' : ''}`}
-                >
-                  Admin
-                </Link>
-              )}
+              <Link 
+                href="/history" 
+                className={`hover:text-indigo-600 transition-colors ${pathname === '/history' ? 'text-indigo-600' : ''}`}
+              >
+                History
+              </Link>
             </div>
           </div>
         </nav>
       </header>
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-        <h1 className="text-4xl sm:text-5xl font-bold text-[#222222] mb-4">Admin Panel</h1>
-        <p className="text-xl text-gray-600 mb-8">Manage bridging parameters, tokens, and emergency controls</p>
 
-        <Tabs defaultValue="tokens" className="space-y-8">
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="tokens">Token Management</TabsTrigger>
-            <TabsTrigger value="params">Bridge Parameters</TabsTrigger>
-            <TabsTrigger value="roles">Role Management</TabsTrigger>
-            <TabsTrigger value="emergency">Emergency Controls</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="tokens">
-            <Card>
-              <CardHeader>
-                <CardTitle>Token Management</CardTitle>
-                <CardDescription>Add or remove supported tokens</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Token Address</TableHead>
-                      <TableHead>Symbol</TableHead>
-                      <TableHead className="text-right">Action</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {mockTokens.map((token) => (
-                      <TableRow key={token.address}>
-                        <TableCell>{token.address}</TableCell>
-                        <TableCell>{token.symbol}</TableCell>
-                        <TableCell className="text-right">
-                          <Button variant="destructive" size="sm" onClick={() => handleRemoveToken(token.address)}>
-                            <FaTrash className="mr-2" /> Remove
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-                <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="newTokenAddress">Token Address</Label>
-                    <Input
-                      id="newTokenAddress"
-                      value={newTokenAddress}
-                      onChange={(e) => setNewTokenAddress(e.target.value)}
-                      placeholder="0x..."
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="newTokenSymbol">Token Symbol</Label>
-                    <Input
-                      id="newTokenSymbol"
-                      value={newTokenSymbol}
-                      onChange={(e) => setNewTokenSymbol(e.target.value)}
-                      placeholder="ETH"
-                    />
-                  </div>
-                  <div className="flex items-end">
-                    <Button onClick={handleAddToken} className="w-full">
-                      <FaPlus className="mr-2" /> Add Token
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="params">
-            <Card>
-              <CardHeader>
-                <CardTitle>Bridge Parameters</CardTitle>
-                <CardDescription>Adjust bridging fees and minimum deposit thresholds</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <Label htmlFor="bridgeFee">Bridge Fee (%)</Label>
-                    <Input
-                      id="bridgeFee"
-                      type="number"
-                      value={bridgeFee}
-                      onChange={(e) => setBridgeFee(e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="minDeposit">Minimum Deposit</Label>
-                    <Input
-                      id="minDeposit"
-                      type="number"
-                      value={minDeposit}
-                      onChange={(e) => setMinDeposit(e.target.value)}
-                    />
-                  </div>
-                </div>
-                <Button onClick={handleUpdateBridgeParams} className="mt-6">
-                  Update Parameters
-                </Button>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="roles">
-            <Card>
-              <CardHeader>
-                <CardTitle>Role Management</CardTitle>
-                <CardDescription>Assign or revoke roles</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Address</TableHead>
-                      <TableHead>Role</TableHead>
-                      <TableHead className="text-right">Action</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {mockRoles.map((role) => (
-                      <TableRow key={role.address}>
-                        <TableCell>{role.address}</TableCell>
-                        <TableCell>{role.role}</TableCell>
-                        <TableCell className="text-right">
-                          <Button variant="destructive" size="sm" onClick={() => handleRemoveRole(role.address)}>
-                            <FaTrash className="mr-2" /> Remove
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-                <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="newRoleAddress">Address</Label>
-                    <Input
-                      id="newRoleAddress"
-                      value={newRoleAddress}
-                      onChange={(e) => setNewRoleAddress(e.target.value)}
-                      placeholder="0x..."
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="newRole">Role</Label>
-                    <Input
-                      id="newRole"
-                      value={newRole}
-                      onChange={(e) => setNewRole(e.target.value)}
-                      placeholder="Admin, Relayer, etc."
-                    />
-                  </div>
-                  <div className="flex items-end">
-                    <Button onClick={handleAddRole} className="w-full">
-                      <FaPlus className="mr-2" /> Add Role
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="emergency">
-            <Card>
-              <CardHeader>
-                <CardTitle>Emergency Controls</CardTitle>
-                <CardDescription>Pause or unpause the bridge in case of emergencies</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label htmlFor="bridgeState">Bridge State</Label>
-                    <p className="text-sm text-muted-foreground">
-                      {bridgePaused ? "The bridge is currently paused" : "The bridge is currently active"}
-                    </p>
-                  </div>
-                  <Switch id="bridgeState" checked={!bridgePaused} onCheckedChange={handleToggleBridge} />
-                </div>
-                {bridgePaused && (
-                  <div className="mt-4 p-4 bg-red-100 text-red-800 rounded-md flex items-center">
-                    <FaExclamationTriangle className="mr-2" />
-                    <span>Warning: The bridge is currently paused. All transfers are halted.</span>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
-      </main>
-
-      {/* Footer */}
-      <footer className="bg-white py-8 mt-12">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-          <p className="text-gray-600 mb-4">Admin actions are logged and may require multi-sig approval.</p>
-          <div className="flex justify-center space-x-6">
-            <a href="#" className="text-indigo-600 hover:text-indigo-800 transition-colors">
-              Admin Documentation
-            </a>
-            <a href="#" className="text-indigo-600 hover:text-indigo-800 transition-colors">
-              Security Guidelines
-            </a>
-            <a href="#" className="text-indigo-600 hover:text-indigo-800 transition-colors">
-              Support
-            </a>
-          </div>
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900">Admin Dashboard</h1>
+          <p className="mt-2 text-gray-600">
+            Monitor and manage bridge operations
+          </p>
         </div>
-      </footer>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          <StatCard
+            title="Total Volume (24h)"
+            value={`${formatEther(stats.amoy.stats.totalVolume + stats.sepolia.stats.totalVolume)} ETH`}
+            icon={FaChartLine}
+            change={{ value: 12.5, isPositive: true }}
+          />
+          <StatCard
+            title="Total Transfers"
+            value={(stats.amoy.stats.totalTransfers + stats.sepolia.stats.totalTransfers).toString()}
+            icon={FaChartLine}
+            change={{ value: 8.2, isPositive: true }}
+          />
+          <StatCard
+            title="Average Time"
+            value={`${Math.round((stats.amoy.stats.averageTime + stats.sepolia.stats.averageTime) / 2)}s`}
+            icon={FaChartLine}
+            change={{ value: 5.1, isPositive: false }}
+          />
+          <StatCard
+            title="Active Validators"
+            value={(stats.amoy.stats.activeValidators + stats.sepolia.stats.activeValidators).toString()}
+            icon={FaUserShield}
+          />
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <NetworkStatsCard stats={stats.amoy} />
+          <NetworkStatsCard stats={stats.sepolia} />
+          <AdminActions
+            isPaused={isPaused}
+            onTogglePause={handleTogglePause}
+            isLoading={isActionLoading}
+          />
+        </div>
+      </main>
     </div>
   )
 }
