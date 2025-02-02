@@ -19,6 +19,9 @@ import { TransferStatus } from '@/components/TransferStatus'
 import { useTransferService } from '@/hooks/useTransferService'
 import type { Transfer } from '@/types/transfer'
 import { NetworkBadge } from '@/components/NetworkBadge'
+import { sepolia } from 'wagmi/chains'
+import { useTokenApproval } from '@/hooks/useTokenApproval'
+import { useBridgeContract } from '@/hooks/useBridgeContract'
 
 // Components
 const InfoBanner = () => (
@@ -141,14 +144,15 @@ const AddressInput = ({ value, onChange, error, disabled }: AddressInputProps) =
 type TransferDirection = "AtoB" | "BtoA"
 
 export default function TransferPage() {
+  const { address, isConnected } = useAccount()
+  const { bridgeContract } = useBridgeContract()
   const [amount, setAmount] = useState("")
   const [recipientAddress, setRecipientAddress] = useState("")
   const [transferDirection, setTransferDirection] = useState<TransferDirection>("AtoB")
-  const [selectedToken, setSelectedToken] = useState("")
+  const [selectedToken, setSelectedToken] = useState<Address>()
   const [inputError, setInputError] = useState("")
   const [isTransferring, setIsTransferring] = useState(false)
 
-  const { address, isConnected } = useAccount()
   const { pendingTransfers, transferHistory } = useBridge()
   const pathname = usePathname()
 
@@ -162,6 +166,17 @@ export default function TransferPage() {
 
   const sourceTokens = chainConfigs[sourceChainId]?.supportedTokens || []
   const selectedTokenInfo = sourceTokens.find(t => t.address === selectedToken)
+
+  // Get token approval status
+  const tokenApproval = useTokenApproval(
+    selectedToken && bridgeContract ? {
+      token: selectedToken,
+      spender: bridgeContract.address,
+      amount: parseEther(amount || "0"),
+      chainId: sourceChainId,
+      owner: address as Address,
+    } : undefined
+  )
 
   const validateInput = useCallback(() => {
     if (!isConnected) {
@@ -204,26 +219,33 @@ export default function TransferPage() {
     return true
   }, [isConnected, isCorrectChain, selectedToken, amount, recipientAddress, tokenBalance])
 
-  const handleSubmit = useCallback(async () => {
-    if (!validateInput()) return
+  const handleTransfer = async () => {
+    if (!selectedToken || !bridgeContract || !address) return
 
     try {
-      const transferAmount = parseEther(amount)
+      // Check and handle token approval
+      if (!tokenApproval.hasApproval) {
+        const approved = await tokenApproval.checkAndApprove()
+        if (!approved) return
+      }
+
+      // Execute transfer
       await executeLockTokens({
         sourceChainId,
         targetChainId,
-        token: selectedToken as Address,
-        amount: transferAmount,
+        token: selectedToken,
+        amount: parseEther(amount),
         recipient: recipientAddress as Address,
       })
-      
-      setAmount('')
-      setRecipientAddress('')
+
+      // Reset form
+      setAmount("")
+      setRecipientAddress("")
     } catch (error) {
       console.error('Transfer failed:', error)
-      toast.error('Transfer failed. Please try again.')
+      toast.error('Transfer failed')
     }
-  }, [validateInput, amount, executeLockTokens, sourceChainId, targetChainId, selectedToken, recipientAddress])
+  }
 
   const handleVerifyTransfer = useCallback(async (txHash: string) => {
     try {
@@ -318,7 +340,7 @@ export default function TransferPage() {
             />
 
             <button
-              onClick={handleSubmit}
+              onClick={handleTransfer}
               disabled={!isConnected || isTransferring || !!inputError}
               className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-bold py-3 px-8 rounded-full hover:from-indigo-700 hover:to-purple-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >

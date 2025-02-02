@@ -9,12 +9,21 @@ import { useChainSwitch } from './useChainSwitch';
 import { useTokenApproval } from './useTokenApproval';
 import { chainConfigs } from '../types/contracts';
 import { toast } from 'react-hot-toast';
+import { useBridgeContract } from './useBridgeContract';
+
+interface TransferParams {
+  sourceChainId: number;
+  targetChainId: number;
+  token: Address;
+  amount: bigint;
+  recipient: Address;
+}
 
 export function useTransfer() {
   const { address } = useAccount();
   const transferService = useTransferService();
   const { addPendingTransfer, completePendingTransfer } = useBridge();
-  const { approveToken, isApproving } = useTokenApproval();
+  const { bridgeContract } = useBridgeContract();
   const [isTransferring, setIsTransferring] = useState(false);
 
   const handleTransfer = useCallback(async (params: {
@@ -36,18 +45,6 @@ export function useTransfer() {
       if (!isCorrectChain) {
         toast.error('Please switch to the correct network');
         return;
-      }
-
-      // Approve token transfer first
-      const bridgeAddress = chainConfigs[params.sourceChainId].bridge.address;
-      const approved = await approveToken({
-        token: params.token,
-        spender: bridgeAddress,
-        amount: params.amount,
-      });
-
-      if (!approved) {
-        throw new Error('Token approval failed');
       }
 
       // Lock tokens on source chain
@@ -91,10 +88,68 @@ export function useTransfer() {
     } finally {
       setIsTransferring(false);
     }
-  }, [address, transferService, addPendingTransfer, completePendingTransfer, approveToken]);
+  }, [address, transferService, addPendingTransfer, completePendingTransfer]);
+
+  const executeLockTokens = async (params: TransferParams) => {
+    if (!address || !bridgeContract) {
+      toast.error('Wallet not connected');
+      return;
+    }
+
+    // Create token approval params
+    const approvalParams = {
+      token: params.token,
+      spender: bridgeContract.address,
+      amount: params.amount,
+      chainId: params.sourceChainId,
+      owner: address,
+    };
+
+    // Use token approval hook at component level
+    const tokenApproval = useTokenApproval(approvalParams);
+
+    try {
+      if (!tokenApproval.hasApproval) {
+        const approved = await tokenApproval.checkAndApprove();
+        if (!approved) return;
+      }
+
+      setIsTransferring(true);
+      const tx = await bridgeContract.write.lockTokens({
+        args: [params.token, params.amount, params.recipient],
+      });
+      await tx.wait();
+      toast.success('Tokens locked successfully');
+    } catch (error) {
+      console.error('Lock tokens failed:', error);
+      toast.error('Failed to lock tokens');
+    } finally {
+      setIsTransferring(false);
+    }
+  };
+
+  const executeMintTokens = async (params: TransferParams) => {
+    if (!bridgeContract) {
+      toast.error('Bridge contract not initialized');
+      return;
+    }
+
+    try {
+      const tx = await bridgeContract.write.mintTokens({
+        args: [params.token, params.amount, params.recipient],
+      });
+      await tx.wait();
+      toast.success('Tokens minted successfully');
+    } catch (error) {
+      console.error('Mint tokens failed:', error);
+      toast.error('Failed to mint tokens');
+    }
+  };
 
   return {
     handleTransfer,
-    isTransferring: isTransferring || isApproving,
+    executeLockTokens,
+    executeMintTokens,
+    isTransferring,
   };
 } 

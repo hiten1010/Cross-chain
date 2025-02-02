@@ -1,20 +1,32 @@
 import { defineChain } from 'viem';
-import { CHAIN_IDS, RPC_URLS } from '@/constants/chains';
+import { CHAIN_IDS } from '@/constants/chains';
 
+// Define Amoy testnet (previously called Amoy)
 export const amoy = defineChain({
   id: CHAIN_IDS.AMOY,
   name: 'Amoy',
+  network: 'amoy',
   nativeCurrency: {
     decimals: 18,
     name: 'ETH',
     symbol: 'ETH',
   },
   rpcUrls: {
-    default: { http: [RPC_URLS[CHAIN_IDS.AMOY]] },
-    public: { http: [RPC_URLS[CHAIN_IDS.AMOY]] },
+    default: { 
+      http: [
+        'https://polygon-mumbai.infura.io/v3/YOUR_INFURA_KEY',
+        'https://rpc-mumbai.maticvigil.com',
+      ],
+    },
+    public: { 
+      http: [
+        'https://polygon-mumbai.infura.io/v3/YOUR_INFURA_KEY',
+        'https://rpc-mumbai.maticvigil.com',
+      ],
+    },
   },
   blockExplorers: {
-    default: { name: 'AmoyExplorer', url: 'https://explorer.amoy.xyz' },
+    default: { name: 'AmoyExplorer', url: 'https://mumbai.polygonscan.com' },
   },
   testnet: true,
 });

@@ -1,43 +1,62 @@
 'use client';
 
-import { useCallback, useState } from 'react';
-import { Address } from 'viem';
-import { useContractWrite, erc20ABI } from 'wagmi';
-import { toast } from 'react-hot-toast';
+import { useContractWrite, useContractRead } from 'wagmi'
+import { Address } from 'viem'
+import { toast } from 'react-hot-toast'
+import { ERC20_ABI } from '@/types/contracts'
 
-export function useTokenApproval() {
-  const [isApproving, setIsApproving] = useState(false);
+interface TokenApprovalParams {
+  token: Address
+  spender: Address
+  amount: bigint
+  chainId: number
+  owner: Address
+}
 
-  const { writeAsync: approve } = useContractWrite({
-    abi: erc20ABI,
-    functionName: 'approve',
-  });
+export function useTokenApproval(params?: TokenApprovalParams) {
+  const { data: allowance } = useContractRead(
+    params ? {
+      address: params.token,
+      abi: ERC20_ABI,
+      functionName: 'allowance',
+      args: [params.owner, params.spender],
+      chainId: params.chainId,
+      watch: true,
+    } : undefined
+  )
 
-  const approveToken = useCallback(async (params: {
-    token: Address;
-    spender: Address;
-    amount: bigint;
-  }) => {
-    setIsApproving(true);
+  const { writeAsync: approve } = useContractWrite(
+    params ? {
+      address: params.token,
+      abi: ERC20_ABI,
+      functionName: 'approve',
+      chainId: params.chainId,
+    } : undefined
+  )
+
+  const checkAndApprove = async () => {
+    if (!params || !approve) return false
+
     try {
-      const tx = await approve({
-        address: params.token,
-        args: [params.spender, params.amount],
-      });
-      await tx.wait();
-      toast.success('Token approved successfully');
-      return true;
+      if (!allowance || allowance < params.amount) {
+        const tx = await approve({
+          args: [params.spender, params.amount],
+        })
+        await tx.wait()
+        toast.success('Token approval successful')
+        return true
+      }
+      return true
     } catch (error) {
-      console.error('Token approval failed:', error);
-      toast.error('Token approval failed');
-      return false;
-    } finally {
-      setIsApproving(false);
+      console.error('Token approval failed:', error)
+      toast.error('Token approval failed')
+      return false
     }
-  }, [approve]);
+  }
 
   return {
-    approveToken,
-    isApproving,
-  };
+    checkAndApprove,
+    hasApproval: allowance ? allowance >= (params?.amount || 0n) : false,
+    allowance,
+  }
 } 

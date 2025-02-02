@@ -99,16 +99,18 @@ export function BridgeProvider({ children }: { children: ReactNode }) {
     }
   }, [address, chainId]);
 
+  const value = {
+    pendingTransfers,
+    transferHistory,
+    balances,
+    updateBalances,
+    addPendingTransfer,
+    completePendingTransfer,
+    verifyTransfer
+  };
+
   return (
-    <BridgeContext.Provider value={{
-      pendingTransfers,
-      transferHistory,
-      balances,
-      updateBalances,
-      addPendingTransfer,
-      completePendingTransfer,
-      verifyTransfer
-    }}>
+    <BridgeContext.Provider value={value}>
       {children}
     </BridgeContext.Provider>
   );

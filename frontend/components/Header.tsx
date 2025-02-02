@@ -5,12 +5,22 @@ import { useAccount } from 'wagmi'
 import { FaExchangeAlt } from "react-icons/fa"
 import { WalletConnect } from './WalletConnect'
 import { usePathname } from 'next/navigation'
+import { useState, useEffect } from 'react'
 
 export function Header() {
   const { isConnected } = useAccount()
   const pathname = usePathname()
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   const isActive = (path: string) => pathname === path ? 'text-indigo-600' : 'text-gray-600'
+
+  if (!mounted) {
+    return null // Return null on server-side to prevent hydration mismatch
+  }
 
   return (
     <header className="bg-white/80 backdrop-blur-sm sticky top-0 z-10 shadow-sm">

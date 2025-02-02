@@ -1,35 +1,39 @@
 'use client';
 
-import { useEffect } from 'react';
-import { useChainId, useConfig } from 'wagmi';
-import { toast } from 'react-hot-toast';
-import { amoy, sepolia } from '../config/chains';
+import { useAccount, useChainId, useSwitchChain } from 'wagmi'
+import { sepolia } from 'wagmi/chains'
+import { amoy } from '@/config/chains'
+import { toast } from 'react-hot-toast'
 
-export function useChainSwitch(targetChainId: number) {
-  const chainId = useChainId();
-  const config = useConfig();
+export function useChainSwitch(requiredChainId: number) {
+  const chainId = useChainId()
+  const { switchChainAsync, isPending } = useSwitchChain()
 
-  useEffect(() => {
-    if (chainId && chainId !== targetChainId) {
-      toast.loading('Please switch networks in your wallet');
-      
-      // Request network switch
-      const targetChain = targetChainId === amoy.id ? amoy : sepolia;
-      window.ethereum?.request({
-        method: 'wallet_addEthereumChain',
-        params: [{
-          chainId: `0x${targetChainId.toString(16)}`,
-          chainName: targetChain.name,
-          nativeCurrency: targetChain.nativeCurrency,
-          rpcUrls: targetChain.rpcUrls.public.http,
-          blockExplorerUrls: [targetChain.blockExplorers?.default.url],
-        }],
-      });
+  const isCorrectChain = chainId === requiredChainId
+
+  const switchToRequiredChain = async () => {
+    if (!switchChainAsync) {
+      toast.error('Network switching not supported')
+      return false
     }
-  }, [chainId, targetChainId]);
+
+    if (!isCorrectChain) {
+      try {
+        await switchChainAsync({ chainId: requiredChainId })
+        return true
+      } catch (error) {
+        console.error('Failed to switch network:', error)
+        toast.error('Failed to switch network')
+        return false
+      }
+    }
+
+    return true
+  }
 
   return {
-    isCorrectChain: chainId === targetChainId,
-    currentChainId: chainId,
-  };
+    isCorrectChain,
+    isLoading: isPending,
+    switchToRequiredChain
+  }
 } 

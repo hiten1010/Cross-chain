@@ -1,13 +1,13 @@
 'use client';
 
-import { CHAIN_IDS } from '@/constants/chains';
+import { CHAIN_IDS, NETWORK_NAMES } from '@/constants/chains';
 
 interface NetworkBadgeProps {
   chainId: number
 }
 
 export function NetworkBadge({ chainId }: NetworkBadgeProps) {
-  const network = chainId === CHAIN_IDS.AMOY ? 'Amoy' : 'Sepolia'
+  const network = NETWORK_NAMES[chainId] || 'Unknown'
   const color = chainId === CHAIN_IDS.AMOY ? 'purple' : 'indigo'
   
   return (

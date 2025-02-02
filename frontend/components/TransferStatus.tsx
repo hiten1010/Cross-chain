@@ -5,8 +5,10 @@ import Link from 'next/link';
 import { formatEther } from 'viem';
 import { FaInfoCircle, FaExternalLinkAlt, FaChevronDown, FaChevronUp } from 'react-icons/fa';
 import type { TransferStatusProps } from '@/types/transfer';
+import { useBridge } from '@/contexts/BridgeContext';
 
 export function TransferStatus({ transfer, onVerify, showDetails = false }: TransferStatusProps) {
+  const { completePendingTransfer } = useBridge();
   const [isExpanded, setIsExpanded] = useState(false);
 
   const statusColors = {
