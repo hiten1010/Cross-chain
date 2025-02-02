@@ -9,6 +9,8 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { FaUpload, FaCheck, FaTimes, FaExternalLinkAlt, FaInfoCircle } from "react-icons/fa"
+import { MerkleTree } from 'merkletreejs'
+import { ethers } from 'ethers'
 
 type VerificationResult = {
   isValid: boolean
@@ -68,6 +70,12 @@ export default function ProofVerification() {
       setIsVerifying(false)
     }
   }
+
+  const generateMerkleProof = (txData: any) => {
+    const leaves = [txData].map(x => ethers.keccak256(x));
+    const tree = new MerkleTree(leaves, ethers.keccak256);
+    return tree.getHexProof(leaves[0]);
+  };
 
   return (
     <div className="min-h-screen bg-[#f7f9fc]">

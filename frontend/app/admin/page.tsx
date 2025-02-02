@@ -34,6 +34,8 @@ export default function AdminPage() {
   const [minDeposit, setMinDeposit] = useState("0.01")
   const [newRoleAddress, setNewRoleAddress] = useState("")
   const [newRole, setNewRole] = useState("")
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [signerVerification, setSignerVerification] = useState(false);
 
   const handleAddToken = () => {
     // Implement token addition logic
@@ -68,6 +70,10 @@ export default function AdminPage() {
     // Implement bridge pause/unpause logic
     console.log("Toggling bridge state")
   }
+
+  const verifyMultiSig = async (txHash: string) => {
+    // Implement multi-sig verification logic
+  };
 
   if (!isAdmin) {
     return (

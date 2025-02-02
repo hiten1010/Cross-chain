@@ -5,12 +5,32 @@ import Head from "next/head"
 import { FaInfoCircle, FaArrowRight, FaWallet } from "react-icons/fa"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
+import { useAccount, useConnect } from 'wagmi'
+import { useChainId, useSwitchChain } from 'wagmi'
+import { useWriteContract } from 'wagmi'
+import bridgeABI from '../../abi/bridge.json'
+import { useQuery } from '@apollo/client'
+import { gql } from '@apollo/client'
+
+// Add bridge address constant
+const bridgeAddress = '0xYourContractAddressHere' // Replace with actual contract address
 
 // Mock function for wallet connection
 const connectWallet = async () => {
   // Implement actual wallet connection logic here
   return "0x1234...5678"
 }
+
+const GET_TRANSACTIONS = gql`
+  query GetTransactions($address: String!) {
+    locks(where: { sender: $address }) {
+      id
+      amount
+      token
+      timestamp
+    }
+  }
+`;
 
 export default function Transfer() {
   const [walletAddress, setWalletAddress] = useState<string | null>(null)
@@ -21,19 +41,35 @@ export default function Transfer() {
   const [isApproved, setIsApproved] = useState(false)
   const [transactionStatus, setTransactionStatus] = useState<string | null>(null)
   const pathname = usePathname()
+  const chainId = useChainId()
+  const { chains, error, switchChain } = useSwitchChain()
+  const { writeContract } = useWriteContract()
+
+  const handleTransfer = async () => {
+    setTransactionStatus("Waiting for Wallet Confirmation...")
+    try {
+      writeContract({
+        address: bridgeAddress,
+        abi: bridgeABI,
+        functionName: 'lockTokens',
+        args: [amount, recipientAddress, selectedToken],
+      }, {
+        onSuccess: (hash) => {
+          setTransactionStatus(`Transaction Successful! Hash: ${hash}`)
+        },
+        onError: (error) => {
+          setTransactionStatus(`Error: ${error.message}`)
+        }
+      })
+    } catch (error) {
+      setTransactionStatus(`Error: ${error.message}`)
+    }
+  }
 
   const handleConnectWallet = async () => {
     const address = await connectWallet()
     setWalletAddress(address)
     setRecipientAddress(address)
-  }
-
-  const handleTransfer = () => {
-    setTransactionStatus("Waiting for Wallet Confirmation...")
-    // Implement actual transfer logic here
-    setTimeout(() => {
-      setTransactionStatus("Transaction Successful!")
-    }, 2000)
   }
 
   return (

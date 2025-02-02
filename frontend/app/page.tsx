@@ -6,11 +6,18 @@ import Link from "next/link"
 import { FaLock, FaBolt, FaExchangeAlt, FaWallet, FaChevronRight } from "react-icons/fa"
 import ChatbotOverlay from "../components/ChatbotOverlay"
 import { usePathname } from "next/navigation"
+import { useAccount, useConnect } from 'wagmi'
+import { config } from '../config/wagmi'
 
-// Mock function for wallet connection
+// Replace mock implementation with real wallet connection
 const connectWallet = async () => {
-  // Implement actual wallet connection logic here
-  return "0x1234...5678"
+  if (window.ethereum) {
+    const accounts = await window.ethereum.request({ 
+      method: 'eth_requestAccounts' 
+    });
+    return accounts[0];
+  }
+  throw new Error('No Ethereum provider found');
 }
 
 const truncateAddress = (address: string) => {
@@ -78,6 +85,8 @@ export default function Home() {
   const [walletAddress, setWalletAddress] = useState<string | null>(null)
   const pathname = usePathname()
   const isAdmin = true // Replace with actual admin check
+  const { address, isConnected } = useAccount();
+  const { connect } = useConnect({ config })
 
   const handleConnectWallet = async () => {
     const address = await connectWallet()
