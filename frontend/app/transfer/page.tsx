@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect } from "react"
 import { FaArrowRight, FaExchangeAlt, FaInfoCircle } from "react-icons/fa"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
@@ -160,7 +160,18 @@ export default function TransferPage() {
   const targetChainId = transferDirection === "AtoB" ? CHAIN_IDS.SEPOLIA : CHAIN_IDS.AMOY
 
   const { isCorrectChain } = useChainSwitch(sourceChainId)
-  const { tokenBalance } = useTokenBalance(sourceChainId)
+  const { tokenBalance, isLoading: balanceLoading, error: balanceError } = useTokenBalance(
+    sourceChainId,
+    {
+      watch: true,
+      retry: true,
+      retryDelay: 2000,
+      onError: (err) => {
+        console.error('Balance error:', err)
+        toast.error('Failed to load balance. Please check your network connection.')
+      },
+    }
+  )
   const { executeLockTokens, executeMintTokens } = useTransfer()
   const transferService = useTransferService()
 
@@ -177,6 +188,22 @@ export default function TransferPage() {
       owner: address as Address,
     } : undefined
   )
+
+  // Show loading state
+  useEffect(() => {
+    if (balanceLoading) {
+      toast.loading('Loading balance...', { id: 'balance-loading' })
+    } else {
+      toast.dismiss('balance-loading')
+    }
+  }, [balanceLoading])
+
+  // Show balance error
+  useEffect(() => {
+    if (balanceError) {
+      toast.error(balanceError)
+    }
+  }, [balanceError])
 
   const validateInput = useCallback(() => {
     if (!isConnected) {
@@ -328,8 +355,9 @@ export default function TransferPage() {
               balance={tokenBalance}
               symbol={selectedTokenInfo?.symbol}
               onMax={() => tokenBalance && setAmount(formatEther(tokenBalance))}
-              error={inputError}
-              disabled={isTransferring}
+              error={inputError || balanceError}
+              disabled={isTransferring || balanceLoading}
+              isLoading={balanceLoading}
             />
 
             <AddressInput

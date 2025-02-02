@@ -10,9 +10,10 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useBridge } from "@/contexts/BridgeContext"
 import { formatEther, Address, Hash } from "viem"
-import { amoy, sepolia } from "@/config/chains"
+import { amoy } from "@/config/chains"
 import { CSVLink } from "react-csv"
 import type { Transfer } from "@/types/transfer"
+import { sepolia } from 'wagmi/chains'
 
 interface FilterProps {
   searchTerm: string

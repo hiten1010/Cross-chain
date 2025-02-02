@@ -8,10 +8,11 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useBridgeContract } from '@/hooks/useBridgeContract'
 import { useTransferService } from '@/hooks/useTransferService'
-import { amoy, sepolia } from '@/config/chains'
+import { amoy } from '@/config/chains'
 import { toast } from 'react-hot-toast'
 import { useAdmin } from '@/hooks/useAdmin'
 import { useTransferStats } from '@/hooks/useTransferStats'
+import { sepolia } from 'wagmi/chains'
 
 interface BridgeStats {
   totalTransfers: number
